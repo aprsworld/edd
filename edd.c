@@ -10,7 +10,7 @@
 
 
 
-const int8 NMEA0183_TRIGGER[] = { 'G', 'P', 'G', 'G', 'A' };
+const int8 NMEA0183_TRIGGER[] = { 'G', 'N', 'G', 'G', 'A' };
 
 
 
@@ -133,18 +133,45 @@ void main(void) {
 	int8 i;
 //	int16 l,m;
 
+	output_low(CONTROL_A);
+	output_low(CONTROL_B);
+
 	init();
 
 	output_low(LED_RED);
 	output_low(LED_GREEN);
 
+#if 0
+	for ( i=0 ; i<10 ; i++ ) {
+		restart_wdt();
 
-//	fprintf(SERIAL_XTC,"# vectorWindXTC (%s) on XTC\r\n",__DATE__);
+		output_high(LED_GREEN);
+		output_low(LED_RED);
+
+		delay_ms(250);
+
+		output_low(LED_GREEN);
+		output_high(LED_RED);
+
+		delay_ms(250);
+	}
+
+	output_low(LED_RED);
+	output_low(LED_GREEN);
+#endif
+
+
+	fprintf(SERIAL_XTC,"# EDD (%s) on XTC\r\n",__DATE__);
 
 	/* start 100uS timer */
-	enable_interrupts(INT_TIMER2);
+//	enable_interrupts(INT_TIMER2);
 	/* enable serial ports */
 	enable_interrupts(INT_RDA);
+
+	/* 1 second time pulse from GNSS */
+	enable_interrupts(INT_EXT);
+
+	/* turn on interrupts */
 	enable_interrupts(GLOBAL);
 
 	i=0;
@@ -171,11 +198,11 @@ void main(void) {
 //			fprintf(SERIAL_XTC,"# got trigger sentence\r\n");
 		}	
 
-		/* as soon as interrupt finishes a $xxHDT we are ready to send our data */
+		/* as soon as interrupt finishes a trigger sentence we are ready to send our data */
 		if ( action.now_gnss_trigger_done) { 
 			action.now_gnss_trigger_done=0;
-
-	output_toggle(LED_RED);
+	
+			output_toggle(LED_RED);
 			/* start a countdown for our slot for transmit */
 			current.live_countdown=LIVE_SLOT_DELAY;
 
@@ -200,15 +227,8 @@ void main(void) {
 #if 0
 			fprintf(SERIAL_XTC,"# finished receiving trigger sentence or timeout\r\n");
 			fprintf(SERIAL_XTC,"# current.live_age=%u\r\n",current.live_age);
-			fprintf(SERIAL_XTC,"# {count=%lu, period=%lu, min_period=%lu}\r\n",
-				current.strobed_pulse_count,
-				current.strobed_pulse_period,
-				current.strobed_pulse_min_period
-			);
-			fprintf(SERIAL_XTC,"# {input=%lu, vertical=%lu, wind_vane=%lu}\r\n",
-				current.input_voltage_adc,
-				current.vertical_anemometer_adc,
-				current.wind_vane_adc
+			fprintf(SERIAL_XTC,"# {input=%lu}\r\n",
+				current.input_voltage_adc
 			);
 			fprintf(SERIAL_XTC,"# current {gnss_age=%u gnss='%s'}\r\n",
 				current.gnss_age,

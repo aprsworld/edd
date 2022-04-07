@@ -1,7 +1,7 @@
 #include <18F24J11.h>
 #device ADC=10
 #device *=16
-#device HIGH_INTS=TRUE
+//#device HIGH_INTS=TRUE
 #fuses INTRC_IO, WDT8192, NOIESO, NOFCMEN, NODEBUG, NOSTVREN, T1DIG
 
 
@@ -9,7 +9,7 @@
 #use delay(clock=8000000, restart_wdt)
 
 /* Vector GNSS */
-#use rs232(UART1,stream=SERIAL_GNSS,baud=19200,xmit=PIN_C6,rcv=PIN_C7,ERRORS)	
+#use rs232(UART1,stream=SERIAL_GNSS,baud=9600,xmit=PIN_C6,rcv=PIN_C7,ERRORS)	
 // for PIC18F24J11
 //#byte TXSTA=0xfad
 //#bit  TRMT=TXSTA.1
@@ -43,6 +43,9 @@ leave last 1K of code space alone for param storage
 #define GNSS_PORT_A_RX      PIN_C6
 #define FROM_MODEM_DATA     PIN_C1
 #define TO_MODEM_DATA       PIN_C0
+
+#define CONTROL_A           PIN_C3
+#define CONTROL_B           PIN_C2
 
 /* analog inputs */
 #define AN_IN_VOLTS        PIN_A0

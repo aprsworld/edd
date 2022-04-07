@@ -1,12 +1,26 @@
 
 
-#int_timer2  HIGH
+#int_timer2  /* HIGH used if we need high acuracy. Also need #device HIGH_INTS=TRUE */
 /* this timer only runs once booted */
 void isr_100us(void) {
+	static int8 tick=0;
+
+	/* every 100 cycles we tell main() loop to do 10 milisecond activities */
+	tick++;
+	if ( 100 == tick ) {
+		tick=0;
+		action.now_10millisecond=1;
+	}
+	
+
 }
 
 
+#int_ext
+void isr_timepulse() {
+	output_toggle(LED_GREEN);
 
+}
 
 #int_rda2
 void serial_isr_wireless(void) {
