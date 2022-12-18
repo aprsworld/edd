@@ -175,26 +175,89 @@ void ubx_config_message_rate(int8 ubx_cls, int8 ubx_id, int8 ubx_rate) {
 
 	delay_ms(100);
 
+}
+
+void ubx_config_geofence(void) {
+	/*
+??:??:??  0000  B5 62 06 69 14 00 00 01 05 00 01 01 00 00 00 DE  µb.i...........Þ
+          0010  39 1A 00 BD F8 C7 10 27 00 00 6F 84              9..½øÇ.'..o..
+	*/
+	int8 ck_a=0;
+	int8 ck_b=0;
+	int8 i;
+	int8 buff[32];
+
+	buff[0]= 0xB5; /* sync char 1 */
+	buff[1]= 0x62; /* sync char 2 */
+
+	/* checksum calculation starts here */
+	buff[2]= 0x06; /* UBX message class */
+	buff[3]= 0x69; /* UBX message ID */
+	buff[4]= 0x14; /* message length LSB 8 + 12*numFences */
+	buff[5]= 0x00; /* message length MSB */
+	buff[6]= 0x00; /* version */
+	buff[7]= 0x01; /* number of geofences contained in this message */
+	buff[8]= 0x05; /* confidence level. 0=no confidence required, 1=68%, 2=95%, 3=99.7%, 4=99.99%, 5=99.999% */
+	buff[9]= 0x00; /* reserved */
+	buff[10]=0x01; /* 1=enable PIO combined fence state output, 0=disable */
+	buff[11]=0x01; /* PIO pin polarity. 0=Low means inside, 1=low means outside. Unknown is alway high */
+	buff[12]=0x0d; /* PIO pin number */
+	buff[13]=0x00; /* reserved */
 #if 0
-	/* B5 62 06 01 02 00 F0 00 F9 11  */
-	buff[0]=0xb5;
-	buff[1]=0x62;
-	buff[2]=0x06;
-	buff[3]=0x01;
-	buff[4]=0x02;
-	buff[5]=0x00;
-	buff[6]=0xf0;
-	buff[7]=0x00;
-	buff[8]=0xf9;
-	buff[9]=0x11;
-	for ( i=0 ; i<=9 ; i++ ) {
+	/* 44, -94 */
+	buff[14]=0x00; /* latitude * 1e-7 */
+	buff[15]=0xDE;
+	buff[16]=0x39;
+	buff[17]=0x1A;
+	buff[18]=0x00; /* longitude * 1e-7 */
+	buff[19]=0xBD;
+	buff[20]=0xF8;
+	buff[21]=0xC7;
+#else
+	/* 43.9878275, -91.8727010 */
+	/* ??:??:??  0000  B5 62 06 69 14 00 00 01 05 00 01 01 0D 00 83 02  µb.i............
+          0010  38 1A 9E 56 3D C9 10 27 00 00 A0 A7              8..V=É.'.. §.
+     */
+	buff[14]=0x83; /* latitude * 1e-7 */
+	buff[15]=0x02;
+	buff[16]=0x38;
+	buff[17]=0x1A;
+	buff[18]=0x9E; /* longitude * 1e-7 */
+	buff[19]=0x56;
+	buff[20]=0x3D;
+	buff[21]=0xC9;
+#endif
+
+#if 0
+	/* 100.00 meter = 1000 value */
+	buff[22]=0x10; /* radius * 1e-2 */
+	buff[23]=0x27;
+	buff[24]=0x00;
+	buff[25]=0x00;
+#else
+	/* 1 meter = 100 value */
+	buff[22]=0x64; /* radius * 1e-2 */
+	buff[23]=0x00;
+	buff[24]=0x00;
+	buff[25]=0x00;
+#endif
+	/* checksum calculation end here */
+
+	/* calculate checksum */
+	for ( i=2 ; i<=25 ; i++ ) {
+		ck_a = ck_a + buff[i];
+		ck_b = ck_b + ck_a;
+	}
+
+	buff[26]=ck_a; 
+	buff[27]=ck_b;
+
+	for ( i=0 ; i<=27 ; i++ ) {
 		fputc(buff[i],SERIAL_GNSS);
-//		delay_us(100);
 	}
 
 	delay_ms(100);
-#endif
-
+          
 }
 
 
@@ -236,7 +299,7 @@ void main(void) {
 	delay_ms(100);
 
 	ubx_config_message_rate(0xF0,0x00,1); /* GGA once per second */
-//	ubx_config_message_rate(0x01,0x39,0); /* UBX-NAV-GEOFENCE once per second */
+	ubx_config_message_rate(0x01,0x39,1); /* UBX-NAV-GEOFENCE once per second */
 #if 1
 	ubx_config_message_rate(0xF0,0x01,0); /* GLL disable */
 	ubx_config_message_rate(0xF0,0x02,0); /* GSA disable */
@@ -245,6 +308,8 @@ void main(void) {
 	ubx_config_message_rate(0xF0,0x41,0); /* TXT disable */
 	ubx_config_message_rate(0xF0,0x05,0); /* VTG disable */
 #endif
+
+	ubx_config_geofence();
 
 	/* start 100uS timer */
 //	enable_interrupts(INT_TIMER2);
@@ -260,6 +325,9 @@ void main(void) {
 	i=0;
 	for ( ; ; ) {
 		restart_wdt();
+
+		/* low output fron GNSS PIO means outside fence */
+		output_bit(LED_RED,! input(GNSS_EXT_INT));
 
 
 #if 0
@@ -284,9 +352,7 @@ void main(void) {
 		/* as soon as interrupt finishes a trigger sentence we are ready to send our data */
 		if ( action.now_gnss_trigger_done) { 
 			action.now_gnss_trigger_done=0;
-	
-			output_toggle(LED_RED);
-			output_toggle(CONTROL_A);
+
 			/* start a countdown for our slot for transmit */
 			current.live_countdown=LIVE_SLOT_DELAY;
 
