@@ -14,6 +14,7 @@ const int8 NMEA0183_TRIGGER[] = { 'G', 'N', 'G', 'G', 'A' };
 
 
 
+
 typedef struct {
 	int16 input_voltage_adc;
 	int16 sequence;
@@ -50,6 +51,9 @@ struct_nmea_raw nmea_raw;
 #include "edd_adc.c"
 #include "edd_interrupts.c"
 #include "edd_live.c"
+
+
+
 
 
 void task_10millisecond(void) {
@@ -128,6 +132,71 @@ void init() {
 	current.live_countdown=0xff;
 }
 
+void ubx_config_message_rate(int8 ubx_cls, int8 ubx_id, int8 ubx_rate) {
+	int8 ck_a=0;
+	int8 ck_b=0;
+	int8 i;
+	int8 buff[32];
+
+	buff[0] =0xB5; /* sync char 1 */
+	buff[1] =0x62; /* sync char 2 */
+
+	/* checksum calculation starts here */
+	buff[2] =0x06; /* ubx message class */
+	buff[3] =0x01; /* ubx message id */
+	buff[4] =0x08; /* message length LSB */
+	buff[5] =0x00; /* message length MSB */
+
+	/* payload */
+	buff[6] =ubx_cls; 
+	buff[7] =ubx_id; 
+	buff[8] =ubx_rate; /* rate on port 1 to 6 (port 6 always 0) */
+	buff[9] =ubx_rate;
+	buff[10] =ubx_rate;
+	buff[11] =ubx_rate;
+	buff[12] =ubx_rate;
+	buff[13] =0;
+	/* checksum calculation end here */
+
+	/* calculate checksum */
+	for ( i=2 ; i<=13 ; i++ ) {
+		ck_a = ck_a + buff[i];
+		ck_b = ck_b + ck_a;
+	}
+
+	buff[14]=ck_a;
+	buff[15]=ck_b;
+
+
+	for ( i=0 ; i<=15 ; i++ ) {
+		fputc(buff[i],SERIAL_GNSS);
+//		delay_us(100);
+	}
+
+	delay_ms(100);
+
+#if 0
+	/* B5 62 06 01 02 00 F0 00 F9 11  */
+	buff[0]=0xb5;
+	buff[1]=0x62;
+	buff[2]=0x06;
+	buff[3]=0x01;
+	buff[4]=0x02;
+	buff[5]=0x00;
+	buff[6]=0xf0;
+	buff[7]=0x00;
+	buff[8]=0xf9;
+	buff[9]=0x11;
+	for ( i=0 ; i<=9 ; i++ ) {
+		fputc(buff[i],SERIAL_GNSS);
+//		delay_us(100);
+	}
+
+	delay_ms(100);
+#endif
+
+}
+
 
 void main(void) {
 	int8 i;
@@ -162,6 +231,20 @@ void main(void) {
 
 
 	fprintf(SERIAL_XTC,"# EDD (%s) on XTC\r\n",__DATE__);
+
+
+	delay_ms(100);
+
+	ubx_config_message_rate(0xF0,0x00,1); /* GGA once per second */
+//	ubx_config_message_rate(0x01,0x39,0); /* UBX-NAV-GEOFENCE once per second */
+#if 1
+	ubx_config_message_rate(0xF0,0x01,0); /* GLL disable */
+	ubx_config_message_rate(0xF0,0x02,0); /* GSA disable */
+	ubx_config_message_rate(0xF0,0x03,0); /* GSV disable */
+	ubx_config_message_rate(0xF0,0x04,0); /* RMC disable */
+	ubx_config_message_rate(0xF0,0x41,0); /* TXT disable */
+	ubx_config_message_rate(0xF0,0x05,0); /* VTG disable */
+#endif
 
 	/* start 100uS timer */
 //	enable_interrupts(INT_TIMER2);
@@ -203,6 +286,7 @@ void main(void) {
 			action.now_gnss_trigger_done=0;
 	
 			output_toggle(LED_RED);
+			output_toggle(CONTROL_A);
 			/* start a countdown for our slot for transmit */
 			current.live_countdown=LIVE_SLOT_DELAY;
 

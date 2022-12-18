@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #use delay(clock=8000000, restart_wdt)
 
-/* Vector GNSS */
+/* ublox CAM-M8 GNSS */
 #use rs232(UART1,stream=SERIAL_GNSS,baud=9600,xmit=PIN_C6,rcv=PIN_C7,ERRORS)	
 // for PIC18F24J11
 //#byte TXSTA=0xfad
