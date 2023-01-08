@@ -50,3 +50,10 @@ leave last 1K of code space alone for param storage
 /* analog inputs */
 #define AN_IN_VOLTS        PIN_A0
 #define ADC_AN_IN_VOLTS    0
+
+
+#define UBX_STATE_INIT         0 
+#define UBX_STATE_SCANNING     1
+#define UBX_STATE_IN_PVT       2
+#define UBX_STATE_IN_GEOFENCE  3
+#define UBX_STATE_IN_DISCARD   255

@@ -19,6 +19,12 @@ void isr_100us(void) {
 #int_ext
 void isr_timepulse() {
 	output_toggle(LED_GREEN);
+	/* clear ubx buffers */
+
+	/* start a countdown for our slot for transmit */
+	current.live_countdown=LIVE_SLOT_DELAY;
+
+	current.ubx_state=UBX_STATE_INIT;
 
 }
 
@@ -29,63 +35,81 @@ void serial_isr_wireless(void) {
 	c=fgetc(SERIAL_XTC);
 }
 
-#define GNSS_STATE_WAITING 0
-#define GNSS_STATE_IN      1
+
 
 #int_rda
 void serial_isr_gnss(void) {
-	static int1 state=GNSS_STATE_WAITING; 
 	static int8 buff[6];
+	static int16 ubx_payload_length=0;
 	static int8 pos;
 	int8 c;
 
 	c=fgetc(SERIAL_GNSS);
 
+	if ( UBX_STATE_INIT == current.ubx_state ) {
+		buff[0]=buff[1]=buff[2]=buff[3]=buff[4]=buff[5]=0;
+		ubx_payload_length=0;
+		pos=0;
+		
+		current.ubx_state=UBX_STATE_SCANNING;
+	} 
 
-	/* skip adding if ( carriage returns OR line feeds OR buffer full ) */
-	if ( '\r' != c && '\n' != c && pos < (sizeof(nmea_raw.buff)-2) ) {
-		/* add to our buffer */
-		nmea_raw.buff[pos]=c;
-		pos++;
-		nmea_raw.buff[pos]='\0';
-	}
 
-	/* capturing data but looking for our trigger so we can set flag */
-	if ( GNSS_STATE_WAITING == state ) {
+	if ( UBX_STATE_SCANNING == current.ubx_state ) {
+		output_low(LED_RED);
+
 		/* FIFO */
-		buff[0]=buff[1];            // '$'
-		buff[1]=buff[2];            // 'G'
-		buff[2]=buff[3];            // 'P'
-		buff[3]=buff[4];            // 'R' or 'H'
-		buff[4]=buff[5];            // 'M' or 'D'
-		buff[5]=c; 					// 'C' or 'T'
+		buff[0]=buff[1];            // 0xB5
+		buff[1]=buff[2];            // 0x62
+		buff[2]=buff[3];            // UBX class
+		buff[3]=buff[4];            // UBX ID
+		buff[4]=buff[5];            // UBX length LSB
+		buff[5]=c;                  // UBX length MSB
 	
-		if ( '$' == buff[0] && NMEA0183_TRIGGER[0] == buff[1] && 
-	 	                       NMEA0183_TRIGGER[1] == buff[2] &&
-		                       NMEA0183_TRIGGER[2] == buff[3] &&
-		                       NMEA0183_TRIGGER[3] == buff[4] &&
-	 	                       NMEA0183_TRIGGER[4] == buff[5] ) {
-			/* matched our 5 character trigger sequence */
-//			action.now_strobe_counters=1;
-			current.gnss_age=0;
-			state=GNSS_STATE_IN;
-
-//			output_toggle(LED_RED);
-		}
-	} else {
-		/* GNSS_STATE_IN */
-		/* in our trigger sentence. Look for '\r' or '\n' that ends it */
-		if ( '\r' == c || '\n' == c ) {
-			for ( c=0 ; c<pos ; c++ ) {
-				current.gnss_buff[c]=nmea_raw.buff[c];
-			}
-			current.gnss_buff[c]='\0';
-			current.gnss_length=pos;
+		if ( 0xB5 == buff[0] && 0x62 == buff[1] ) {
+			/* got UBX message */
 			
-			action.now_gnss_trigger_done=1;
-			state=GNSS_STATE_WAITING;
+			/* extract the length */
+			ubx_payload_length=make16(buff[5],buff[4]);
+
 			pos=0;
+
+			if ( 0x01 == buff[2] && 0x07 == buff[3] ) {
+				current.ubx_state=UBX_STATE_IN_PVT;
+			} else if ( 0x01 == buff[2] && 0x39 == buff[3] ) {
+				current.ubx_state=UBX_STATE_IN_GEOFENCE;
+			} else {
+				current.ubx_state=UBX_STATE_IN_DISCARD;
+			}
+		}
+
+	} else if ( UBX_STATE_IN_PVT == current.ubx_state ) {
+		output_high(LED_RED);
+
+		if ( pos < ubx_payload_length && pos < (sizeof(current.ubx_buff_pvt)-1) ) {
+			/* add to our buffer */
+			current.ubx_buff_pvt[pos]=c;
+			pos++;
+		} else {
+			current.ubx_state=UBX_STATE_SCANNING;
+		}
+	} else if ( UBX_STATE_IN_GEOFENCE == current.ubx_state ) {
+		output_high(LED_RED);
+
+		if ( pos < ubx_payload_length && pos < (sizeof(current.ubx_buff_geofence)-1) ) {
+			/* add to our buffer */
+			current.ubx_buff_geofence[pos]=c;
+			pos++;
+		} else {
+			current.ubx_state=UBX_STATE_SCANNING;
+		}
+	} else if ( UBX_STATE_IN_DISCARD == current.ubx_state ) {
+		output_high(LED_RED);
+
+		if ( pos < ubx_payload_length ) {
+			pos++;
+		} else {
+			current.ubx_state=UBX_STATE_SCANNING;
 		}
 	}
-
 }

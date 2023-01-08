@@ -1,7 +1,7 @@
 #include "edd.h"
 
 #define SERIAL_PREFIX   'A'
-#define SERIAL_NUMBER   4798
+#define SERIAL_NUMBER   4799
 #define LIVE_SLOT_DELAY 95    // milliseconds*10. Value 10=100 milliseconds
                              // 150 bytes of data with MT=3 takes ~75 ms
                              // so we will do 100 millisecond slots
@@ -10,42 +10,61 @@
 
 
 
-const int8 NMEA0183_TRIGGER[] = { 'G', 'N', 'G', 'G', 'A' };
+typedef struct {
+	/* passed directly through to GNSS module */
+	int8 geofence_latitude[4];
+	int8 geofence_longitude[4];
+	int8 geofence_radius[4];
+	int8 geofence_confidence;
 
+	/* evaluated by comparing to GNSS UBX-NAV-PVT */
+	int32 geofence_altitude;
 
+	/* channel a configuration */
+	int16 delay_geofence_a;
+	int16 delay_altitude_a;
+	int16 on_time_a;
 
+	/* channel b configuration */
+	int16 delay_geofence_b;
+	int16 delay_altitude_b;
+	int16 on_time_b;
+} struct_config;
+
+	
 
 typedef struct {
 	int16 input_voltage_adc;
 	int16 sequence;
+	int16 last_command_seconds;
 
-	int8 live_age;
+	int8 flags_a;
+	int16 countdown_a;
+	
+	int8 flags_b;
+	int16 countdown_b;
+	
+	int8 ubx_buff_pvt[95];
+	int8 ubx_buff_geofence[20];
+	
+//	int8 live_age;
 	int8 live_countdown;
 
-	int8 gnss_age;
-	int8 gnss_buff[254];
-	int8 gnss_length;
+	int8 ubx_state;
 } struct_current;
 
 
 typedef struct {
-	short now_nmea_raw_received;
-	short now_gnss_trigger_start;
 	short now_gnss_trigger_done;
 	short now_10millisecond;
 
 } struct_action;
 
 
-typedef struct {
-	int8 buff[254];
-	int8 pos;
-} struct_nmea_raw;
-
 /* global structures */
 struct_current current;
 struct_action action;
-struct_nmea_raw nmea_raw;
+struct_config config;
 
 
 #include "edd_adc.c"
@@ -60,29 +79,6 @@ void task_10millisecond(void) {
 	if ( current.live_countdown > 0 && current.live_countdown != 0xff ) {
 		current.live_countdown--;
 	}
-
-	if ( current.gnss_age < 255 ) {
-		current.gnss_age++;
-	}
-
-	/* age live data timeout */
-	if ( current.live_age < 255 ) {
-		current.live_age++;
-	}
-
-#if 0
-	if ( current.strobed_pulse_count > 0 ) {
-		output_high(LED_ANEMOMETER);
-	} else {
-		output_low(LED_ANEMOMETER);
-	}
-
-	if ( current.vertical_anemometer_adc > 782 || current.vertical_anemometer_adc < 770 ) {
-		output_high(LED_VERTICAL_ANEMOMETER);
-	} else {
-		output_low(LED_VERTICAL_ANEMOMETER);
-	}
-#endif
 }
 
 
@@ -114,19 +110,11 @@ void init() {
 	delay_ms(14);
 
 
-//	action.now_strobe_counters=0;
-	action.now_gnss_trigger_start=0;
 	action.now_gnss_trigger_done=0;
 	action.now_10millisecond=0;
 
+	current.ubx_state=UBX_STATE_INIT;
 
-	nmea_raw.buff[0]='\0';
-	nmea_raw.pos=0;
-
-	current.gnss_age=255;;
-	current.gnss_buff[0]='\0';
-	current.gnss_length=0;
-	
 	current.sequence=0;
 
 	current.live_countdown=0xff;
@@ -293,26 +281,30 @@ void main(void) {
 #endif
 
 
-	fprintf(SERIAL_XTC,"# EDD (%s) on XTC\r\n",__DATE__);
-
-
 	delay_ms(100);
+//	fprintf(SERIAL_XTC,"# EDD (%s) on XTC woohoo\r\n",__DATE__);
 
-	ubx_config_message_rate(0xF0,0x00,1); /* GGA once per second */
-	ubx_config_message_rate(0x01,0x39,1); /* UBX-NAV-GEOFENCE once per second */
-#if 1
-	ubx_config_message_rate(0xF0,0x01,0); /* GLL disable */
-	ubx_config_message_rate(0xF0,0x02,0); /* GSA disable */
-	ubx_config_message_rate(0xF0,0x03,0); /* GSV disable */
-	ubx_config_message_rate(0xF0,0x04,0); /* RMC disable */
-	ubx_config_message_rate(0xF0,0x41,0); /* TXT disable */
-	ubx_config_message_rate(0xF0,0x05,0); /* VTG disable */
-#endif
+
+
+	/* once per second */
+	ubx_config_message_rate(0x01,0x07,1); /* UBX-NAV-PVT */
+	ubx_config_message_rate(0x01,0x39,1); /* UBX-NAV-GEOFENCE */
+
+	/* disable */
+	ubx_config_message_rate(0x01,0x03,0); /* UBX-NAV-STATUS */
+	ubx_config_message_rate(0xF0,0x00,0); /* GGA */ /* if we use NMEA sentences, this is the one we want */
+	ubx_config_message_rate(0xF0,0x01,0); /* GLL */
+	ubx_config_message_rate(0xF0,0x02,0); /* GSA */
+	ubx_config_message_rate(0xF0,0x03,0); /* GSV */
+	ubx_config_message_rate(0xF0,0x04,0); /* RMC */
+	ubx_config_message_rate(0xF0,0x41,0); /* TXT */
+	ubx_config_message_rate(0xF0,0x05,0); /* VTG */
+
 
 	ubx_config_geofence();
 
 	/* start 100uS timer */
-//	enable_interrupts(INT_TIMER2);
+	enable_interrupts(INT_TIMER2);
 	/* enable serial ports */
 	enable_interrupts(INT_RDA);
 
@@ -326,43 +318,21 @@ void main(void) {
 	for ( ; ; ) {
 		restart_wdt();
 
+#if 0
 		/* low output fron GNSS PIO means outside fence */
 		output_bit(LED_RED,! input(GNSS_EXT_INT));
-
-
-#if 0
-		if ( current.live_age >= 120 && 0xff == current.live_countdown ) {
-			/* didn't get a triger sentence from GNSS for last 1.2 seconds. Send data anyhow */
-			action.now_strobe_counters=1;    /* triggers strobe of data */
-			action.now_gnss_trigger_done=1;  /* triggers send of data */
-//			fprintf(SERIAL_XTC,"# timeout waiting for trigger\r\n");
-		}
 #endif
-
-		/* recieving a GNSS trigger on our serial port causes counter values to be strobe. Once that
-		is complete, we sample ADCs */	
-		if ( action.now_gnss_trigger_start ) {
-			action.now_gnss_trigger_start=0;
-
-			sample_adc();
-
-//			fprintf(SERIAL_XTC,"# got trigger sentence\r\n");
-		}	
 
 		/* as soon as interrupt finishes a trigger sentence we are ready to send our data */
 		if ( action.now_gnss_trigger_done) { 
 			action.now_gnss_trigger_done=0;
 
-			/* start a countdown for our slot for transmit */
-			current.live_countdown=LIVE_SLOT_DELAY;
-
 		}
 
 
+		/* live countdown is set to slot delay when time pulse is received */
 		if ( 0==current.live_countdown ) {
-		
-			live_send();
-			current.live_age=0;
+			live_send_edd();
 			current.live_countdown=0xff;
 		}
 
@@ -374,14 +344,3 @@ void main(void) {
 	}
 }
 
-#if 0
-			fprintf(SERIAL_XTC,"# finished receiving trigger sentence or timeout\r\n");
-			fprintf(SERIAL_XTC,"# current.live_age=%u\r\n",current.live_age);
-			fprintf(SERIAL_XTC,"# {input=%lu}\r\n",
-				current.input_voltage_adc
-			);
-			fprintf(SERIAL_XTC,"# current {gnss_age=%u gnss='%s'}\r\n",
-				current.gnss_age,
-				current.gnss_buff
-			);
-#endif
